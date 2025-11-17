@@ -1,3 +1,11 @@
+#claude/macOS
+.DS_Store
+
+# boilerplate/planning/test reports
+TINKR_FILE_API.md
+COVERAGE_REPORT.md
+BANETO_FEATURES.md
+
 # Compiled Lua sources
 luac.out
 
