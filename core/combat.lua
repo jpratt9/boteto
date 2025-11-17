@@ -153,13 +153,8 @@ function Combat.CastSpell(spellId, target)
 
     local spellName = spellInfo.name
 
-    -- Cast the spell
-    local success = false
-    if target then
-        success = pcall(CastSpellByName, spellName, target)
-    else
-        success = pcall(CastSpellByName, spellName)
-    end
+    -- Cast the spell (target should already be set via Combat.SetTarget)
+    local success = pcall(CastSpellByName, spellName)
 
     if success then
         Combat.lastCastTime = GetTime()

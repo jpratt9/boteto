@@ -9,12 +9,14 @@ boteto/
 ├── core/
 │   ├── state_machine.lua        # State management (15 states)
 │   ├── file_management.lua      # File I/O utilities
-│   └── combat.lua               # Combat rotation execution
+│   ├── combat.lua               # Combat rotation execution
+│   └── looting.lua              # Looting & skinning system
 ├── test/
 │   ├── test_state_machine.lua   # State machine tests (10)
 │   ├── test_file_management.lua # File management tests (26)
 │   ├── test_bot_core.lua        # Bot core tests (15)
 │   ├── test_combat.lua          # Combat tests (20)
+│   ├── test_looting.lua         # Looting tests (37)
 │   └── run_all_tests.lua        # Master test runner
 ├── rotations/                   # Saved rotation files
 ├── main.lua                     # Main bot logic & GUI
@@ -48,7 +50,7 @@ lua run_all_tests.lua
 
 ### Test Coverage
 
-- **71 tests** across 4 test suites
+- **108 tests** across 5 test suites
 - **95%+ coverage** of testable code
 - All tests passing ✅
 
@@ -64,6 +66,7 @@ Once loaded in WoW:
 /run ToggleGUI()                     -- Show/hide main GUI
 /run PrintState()                    -- Print state machine status
 /run Combat.PrintRotationStatus()    -- Print rotation status
+/run Looting.PrintLootingStatus()    -- Print looting status
 /run SetBotState(StateMachine.STATES.FIGHTING)
 ```
 
@@ -76,6 +79,12 @@ Once loaded in WoW:
   - GCD detection
   - Resource checking (mana/energy/rage)
   - Cast delay/throttling
+- **Looting System**: Automated corpse looting and skinning
+  - Auto-loot nearby corpses
+  - Bag space checking
+  - Skinning support with GUID tracking
+  - Configurable loot/skin ranges
+  - Prevents double-skinning
 - **Rotation Builder**: Drag-and-drop spell rotation editor
 - **Rotation Saving**: Save/load rotations to disk
 - **GUI**: Main control panel + rotation builder window
@@ -88,7 +97,7 @@ Once loaded in WoW:
 3. **Build a rotation**: Drag spells from spellbook to rotation builder
 4. **Save rotation**: Enter name and click "Save"
 5. **Start bot**: Click "Start Bot" button
-6. **Fight**: Bot will automatically target and fight nearby enemies using your rotation
+6. **Fight & Loot**: Bot will automatically target, fight, and loot nearby enemies
 
 ## Combat System
 
@@ -123,6 +132,45 @@ Simple rogue rotation (priority order):
 3. Auto-attack
 
 The bot casts the first available spell in the list every update cycle.
+
+## Looting System
+
+The looting module automatically collects items from defeated enemies:
+
+### How It Works
+
+1. **Corpse Detection**: Finds nearby lootable corpses within 5 yards
+2. **Bag Space Check**: Ensures at least 1 free bag slot before looting
+3. **Auto-Loot**: Interacts with corpses to open loot window
+4. **Skinning**: If player has skinning, skins corpses after looting
+5. **GUID Tracking**: Prevents double-skinning using GUID system
+6. **State Management**: Automatically transitions to LOOTING state
+
+### Looting Functions
+
+- `Looting.GetFreeBagSlots()` - Count available bag slots
+- `Looting.GetLootableCorpses()` - Find nearby lootable corpses
+- `Looting.GetSkinnableCorpses()` - Find skinnable corpses
+- `Looting.LootCorpse(unit)` - Loot a specific corpse
+- `Looting.SkinCorpse(unit)` - Skin a specific corpse
+- `Looting.CanPlayerSkin()` - Check if player has skinning skill
+- `Looting.HasBeenSkinned(guid)` - Check GUID tracking
+- `Looting.ExecuteLooting()` - Main looting loop
+
+### Configuration
+
+- `Looting.LOOT_RANGE` - Max loot distance (5.0 yards)
+- `Looting.SKIN_RANGE` - Max skin distance (5.5 yards)
+- `Looting.SKIN_DELAY` - Delay before skinning (0.5s)
+- `Looting.LOOT_DELAY` - Delay between loots (0.3s)
+
+### Skinning
+
+The skinning system uses GUID tracking to prevent skinning the same corpse twice:
+- Tracks skinned corpses by GUID
+- Auto-cleans entries older than 5 minutes
+- Only skins if player has Skinning profession
+- Respects skin delay to prevent spam
 
 ## File Loading Pattern
 

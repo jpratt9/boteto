@@ -13,7 +13,8 @@ local testFiles = {
     "test_state_machine.lua",
     "test_file_management.lua",
     "test_bot_core.lua",
-    "test_combat.lua"
+    "test_combat.lua",
+    "test_looting.lua"
 }
 
 local totalSuites = #testFiles

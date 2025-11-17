@@ -5,6 +5,17 @@
 
 local Tinkr = ...
 
+-- Expose Tinkr functions as globals
+if Tinkr then
+    if not _G.ReadFile and Tinkr.ReadFile then
+        _G.ReadFile = function(path) return Tinkr.ReadFile(path) end
+        _G.WriteFile = function(path, data, append) return Tinkr.WriteFile(path, data, append or false) end
+        _G.FileExists = function(path) return Tinkr.FileExists(path) end
+        _G.DirectoryExists = function(path) return Tinkr.DirectoryExists(path) end
+        _G.CreateDirectory = function(path) return Tinkr.CreateDirectory(path) end
+    end
+end
+
 print("=== Loading BOTETO Main ===")
 
 -- ============================================
@@ -31,10 +42,15 @@ if not loadFunc then
     error("Failed to compile state_machine.lua: " .. tostring(loadErr))
 end
 
-local StateMachine = loadFunc()
+StateMachine = loadFunc()
 if not StateMachine then
     error("state_machine.lua did not return a module table")
 end
+_G.StateMachine = StateMachine
+
+-- Initialize global state (must be done in caller scope, not module scope)
+_G.BOTETO_CURRENT_STATE = StateMachine.STATES.IDLE
+
 print("[✓] State Machine loaded")
 
 -- Load file management module
@@ -49,29 +65,119 @@ if not loadFunc then
     error("Failed to compile file_management.lua: " .. tostring(loadErr))
 end
 
-local FileManagement = loadFunc()
+FileManagement = loadFunc()
 if not FileManagement then
     error("file_management.lua did not return a module table")
 end
+_G.FileManagement = FileManagement
 print("[✓] File Management loaded")
 
 -- Load combat module
 print("Loading combat.lua...")
 local combatCode = ReadFile(_G.BOTETO_BASE_PATH .. "core/combat.lua")
 if not combatCode then
+    print("=== COMBAT LOAD ERROR ===")
+    print("Failed to read combat.lua from: " .. _G.BOTETO_BASE_PATH .. "core/combat.lua")
+    print("========================")
     error("Failed to load combat.lua")
 end
 
+print("[DEBUG] Combat code loaded, length: " .. #combatCode)
+
 loadFunc, loadErr = (load or loadstring)(combatCode, "combat.lua")
 if not loadFunc then
+    print("=== COMBAT COMPILE ERROR ===")
+    print("Error: " .. tostring(loadErr))
+    print("===========================")
     error("Failed to compile combat.lua: " .. tostring(loadErr))
 end
 
-local Combat = loadFunc()
+print("[DEBUG] Combat code compiled, executing...")
+
+local success, result = pcall(loadFunc)
+if not success then
+    print("=== COMBAT EXECUTION ERROR ===")
+    print("Error: " .. tostring(result))
+    print("==============================")
+    error("Failed to execute combat.lua: " .. tostring(result))
+end
+
+Combat = result
 if not Combat then
+    print("=== COMBAT MODULE ERROR ===")
+    print("combat.lua did not return a module table")
+    print("Returned: " .. tostring(Combat))
+    print("===========================")
     error("combat.lua did not return a module table")
 end
+
+_G.Combat = Combat
 print("[✓] Combat loaded")
+
+-- Load looting module
+print("Loading looting.lua...")
+local lootingCode = ReadFile(_G.BOTETO_BASE_PATH .. "core/looting.lua")
+if not lootingCode then
+    error("Failed to load looting.lua")
+end
+
+loadFunc, loadErr = (load or loadstring)(lootingCode, "looting.lua")
+if not loadFunc then
+    error("Failed to compile looting.lua: " .. tostring(loadErr))
+end
+
+Looting = loadFunc()
+if not Looting then
+    error("looting.lua did not return a module table")
+end
+_G.Looting = Looting
+print("[✓] Looting loaded")
+
+-- ============================================
+-- DEBUG COMMANDS (defined early so they work even if GUI errors)
+-- ============================================
+
+function PrintState()
+    local success, err = pcall(function()
+        if not StateMachine then
+            error("StateMachine is nil")
+        end
+        if not StateMachine.PrintStatus then
+            error("StateMachine.PrintStatus is nil")
+        end
+        if not _G.BOTETO_CURRENT_STATE then
+            error("BOTETO_CURRENT_STATE is nil")
+        end
+        print("[DEBUG] Calling StateMachine.PrintStatus()")
+        StateMachine.PrintStatus()
+        print("[DEBUG] PrintStatus completed")
+    end)
+
+    if not success then
+        print("=== ERROR IN PrintState ===")
+        print(tostring(err))
+        print("===========================")
+    end
+end
+
+function SetBotState(state)
+    local success, err = pcall(function()
+        if not StateMachine then
+            error("StateMachine is nil")
+        end
+        StateMachine.SetState(state)
+    end)
+
+    if not success then
+        print("=== ERROR IN SetBotState ===")
+        print(tostring(err))
+        print("============================")
+    end
+end
+
+-- Export immediately
+_G.PrintState = PrintState
+_G.SetBotState = SetBotState
 
 -- ============================================
 -- BOT CORE
@@ -123,6 +229,9 @@ function GetEnemies(maxDistance)
     return enemies
 end
 
+-- Make combat helper functions globally accessible
+_G.GetEnemies = GetEnemies
+
 -- Main update function
 local function BotUpdate()
     if not _G.BotEnabled then return end
@@ -131,6 +240,9 @@ local function BotUpdate()
 
     -- Execute combat rotation
     Combat.ExecuteRotation()
+
+    -- Execute looting (runs after combat)
+    Looting.ExecuteLooting()
 end
 
 -- Reuse existing frame or create new one (prevents multiple frames on reload)
@@ -178,6 +290,10 @@ function StartBot()
     StateMachine.SetState(StateMachine.STATES.IDLE)
     print("=== Bot Started ===")
 end
+
+-- Make control functions globally accessible
+_G.StopBot = StopBot
+_G.StartBot = StartBot
 
 -- ============================================
 -- GUI SYSTEM
@@ -279,6 +395,9 @@ function ToggleGUI()
         gui:Show()
     end
 end
+
+-- Make GUI functions globally accessible
+_G.ToggleGUI = ToggleGUI
 
 -- Show GUI by default
 gui:Show()
@@ -579,6 +698,9 @@ function SaveRotation()
     end
 end
 
+-- Make save rotation function globally accessible
+_G.SaveRotation = SaveRotation
+
 -- Load rotation from file
 function LoadRotationByName()
     local rotName = rotBuilder.nameBox:GetText()
@@ -622,6 +744,9 @@ function LoadRotationByName()
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00Rotation '" .. rotName .. "' loaded successfully!|r")
 end
 
+-- Make load rotation function globally accessible
+_G.LoadRotationByName = LoadRotationByName
+
 -- Toggle rotation builder visibility
 function ToggleRotationBuilder()
     if rotBuilder:IsShown() then
@@ -632,24 +757,10 @@ function ToggleRotationBuilder()
     end
 end
 
--- ============================================
--- HELPER COMMANDS
--- ============================================
+-- Make rotation builder functions globally accessible
+_G.ToggleRotationBuilder = ToggleRotationBuilder
 
--- State machine helper commands
-function PrintState()
-    StateMachine.PrintStatus()
-end
-
-function SetBotState(state)
-    StateMachine.SetState(state)
-end
-
--- Make StateMachine globally accessible for debugging
-_G.StateMachine = StateMachine
-
--- Make Combat globally accessible for debugging
-_G.Combat = Combat
+-- Modules and debug commands already exported at top of file
 
 -- ============================================
 -- SUCCESS MESSAGE
@@ -662,6 +773,7 @@ print("  /run StartBot() - Start the bot")
 print("  /run ToggleGUI() - Show/hide main GUI")
 print("  /run PrintState() - Print state machine status")
 print("  /run Combat.PrintRotationStatus() - Print rotation status")
+print("  /run Looting.PrintLootingStatus() - Print looting status")
 print("  /run SetBotState(StateMachine.STATES.FIGHTING) - Manually set state")
 print("Click 'Rotation Builder' button to build rotations!")
-print("Build a rotation and start the bot to auto-fight enemies!")
+print("Build a rotation and start the bot to auto-fight and loot!")

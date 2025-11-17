@@ -24,8 +24,8 @@ StateMachine.STATES = {
     DISMOUNTING = "DISMOUNTING"
 }
 
--- Current state (global for easy access)
-_G.BOTETO_CURRENT_STATE = StateMachine.STATES.IDLE
+-- Current state (initialized by main.lua after module load)
+-- Note: _G.BOTETO_CURRENT_STATE must be set by the caller
 
 -- State change history (for debugging)
 local stateHistory = {}
