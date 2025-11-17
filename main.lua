@@ -11,8 +11,9 @@ print("=== Loading BOTETO Main ===")
 -- CONFIGURATION
 -- ============================================
 
--- Set base path (absolute path to dev folder)
-_G.BOTETO_BASE_PATH = "/Users/john/dev/boteto/"
+-- Set base path (configure this to match your installation directory)
+-- This should point to the directory containing core/, test/, rotations/, etc.
+_G.BOTETO_BASE_PATH = _G.BOTETO_BASE_PATH or "/path/to/boteto/"
 
 -- ============================================
 -- LOAD MODULES
@@ -20,7 +21,7 @@ _G.BOTETO_BASE_PATH = "/Users/john/dev/boteto/"
 
 -- Load state machine module
 print("Loading state_machine.lua...")
-local stateCode = ReadFile("/Users/john/dev/boteto/core/state_machine.lua")
+local stateCode = ReadFile(_G.BOTETO_BASE_PATH .. "core/state_machine.lua")
 if not stateCode then
     error("Failed to load state_machine.lua")
 end
@@ -38,7 +39,7 @@ print("[✓] State Machine loaded")
 
 -- Load file management module
 print("Loading file_management.lua...")
-local fileCode = ReadFile("/Users/john/dev/boteto/core/file_management.lua")
+local fileCode = ReadFile(_G.BOTETO_BASE_PATH .. "core/file_management.lua")
 if not fileCode then
     error("Failed to load file_management.lua")
 end
@@ -56,7 +57,7 @@ print("[✓] File Management loaded")
 
 -- Load combat module
 print("Loading combat.lua...")
-local combatCode = ReadFile("/Users/john/dev/boteto/core/combat.lua")
+local combatCode = ReadFile(_G.BOTETO_BASE_PATH .. "core/combat.lua")
 if not combatCode then
     error("Failed to load combat.lua")
 end

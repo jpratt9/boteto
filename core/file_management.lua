@@ -121,8 +121,11 @@ end
 
 -- Get the base path for BOTETO (the directory containing this script)
 function FileManagement.GetBasePath()
-    -- This will be set by main.lua when it loads this module
-    return _G.BOTETO_BASE_PATH or "/Users/john/dev/boteto/"
+    -- This should be set by main.lua before loading this module
+    if not _G.BOTETO_BASE_PATH then
+        error("BOTETO_BASE_PATH is not set! Please configure it in main.lua")
+    end
+    return _G.BOTETO_BASE_PATH
 end
 
 -- Load a saved rotation

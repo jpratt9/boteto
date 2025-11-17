@@ -5,7 +5,7 @@ A modular WoW Classic bot built for Tinkr on macOS.
 ## Structure
 
 ```
-/Users/john/dev/boteto/
+boteto/
 ├── core/
 │   ├── state_machine.lua        # State management (15 states)
 │   ├── file_management.lua      # File I/O utilities
@@ -31,18 +31,18 @@ The bot is loaded via a simple skeleton in the Tinkr scripts folder:
 /tinkr load scripts/wow-boteto.lua
 ```
 
-The skeleton (`/Users/john/Downloads/tinkr/scripts/wow-boteto.lua`) does two things:
+The skeleton (`scripts/wow-boteto.lua` in Tinkr folder) does two things:
 1. Exposes Tinkr filesystem functions as globals
-2. Loads `/Users/john/dev/boteto/main.lua`
+2. Loads the main bot directory's `main.lua`
 
 ## Development Workflow
 
-All development happens in `/Users/john/dev/boteto/`. The Tinkr scripts folder only contains the tiny loader.
+All development happens in the `boteto/` directory. The Tinkr scripts folder only contains the tiny loader.
 
 ### Running Tests
 
 ```bash
-cd /Users/john/dev/boteto/test
+cd boteto/test
 lua run_all_tests.lua
 ```
 
@@ -135,13 +135,13 @@ local Tinkr = ...
 _G.ReadFile = function(path) return Tinkr.ReadFile(path) end
 
 -- Everywhere else (use the global)
-local code = ReadFile("/Users/john/dev/boteto/module.lua")
+local code = ReadFile(BOTETO_BASE_PATH .. "module.lua")
 local module = (load or loadstring)(code)()
 ```
 
 ## Notes
 
-- All paths use absolute paths to `/Users/john/dev/boteto/`
-- Rotation files are saved to `/Users/john/dev/boteto/rotations/`
+- All paths are configured via `BOTETO_BASE_PATH` variable set in `main.lua`
+- Rotation files are saved to `rotations/` subdirectory
 - GUI code cannot be unit tested (requires WoW API)
 - Core logic has 100% test coverage
