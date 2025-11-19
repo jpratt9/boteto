@@ -1,22 +1,14 @@
 --[[
     BOTETO Main Bot Logic
-    Loaded by wow-bot.lua entrypoint
+    Loaded by wow-boteto.lua entrypoint
+    The entrypoint exposes Tinkr functions (ReadFile, WriteFile, etc.) as globals
 ]]
 
-local Tinkr = ...
-
--- Expose Tinkr functions as globals
-if Tinkr then
-    if not _G.ReadFile and Tinkr.ReadFile then
-        _G.ReadFile = function(path) return Tinkr.ReadFile(path) end
-        _G.WriteFile = function(path, data, append) return Tinkr.WriteFile(path, data, append or false) end
-        _G.FileExists = function(path) return Tinkr.FileExists(path) end
-        _G.DirectoryExists = function(path) return Tinkr.DirectoryExists(path) end
-        _G.CreateDirectory = function(path) return Tinkr.CreateDirectory(path) end
-    end
-end
-
 print("=== Loading BOTETO Main ===")
+print("[DEBUG] main.lua start - Lua version: " .. tostring(_VERSION))
+print("[DEBUG] main.lua start - ReadFile type: " .. type(ReadFile))
+print("[DEBUG] main.lua start - _G.ReadFile type: " .. type(_G.ReadFile))
+print("[DEBUG] main.lua start - getfenv level: " .. tostring(getfenv and getfenv(1) == _G))
 
 -- ============================================
 -- CONFIGURATION
@@ -42,6 +34,9 @@ if not loadFunc then
     error("Failed to compile state_machine.lua: " .. tostring(loadErr))
 end
 
+-- CRITICAL FIX: Force loaded function to use current environment (LOADSTRING_ENVIRONMENT_BUG.md)
+setfenv(loadFunc, getfenv())
+
 StateMachine = loadFunc()
 if not StateMachine then
     error("state_machine.lua did not return a module table")
@@ -64,6 +59,9 @@ loadFunc, loadErr = (load or loadstring)(fileCode, "file_management.lua")
 if not loadFunc then
     error("Failed to compile file_management.lua: " .. tostring(loadErr))
 end
+
+-- CRITICAL FIX: Force loaded function to use current environment (LOADSTRING_ENVIRONMENT_BUG.md)
+setfenv(loadFunc, getfenv())
 
 FileManagement = loadFunc()
 if not FileManagement then
@@ -93,6 +91,9 @@ if not loadFunc then
 end
 
 print("[DEBUG] Combat code compiled, executing...")
+
+-- CRITICAL FIX: Force loaded function to use current environment (LOADSTRING_ENVIRONMENT_BUG.md)
+setfenv(loadFunc, getfenv())
 
 local success, result = pcall(loadFunc)
 if not success then
@@ -126,12 +127,36 @@ if not loadFunc then
     error("Failed to compile looting.lua: " .. tostring(loadErr))
 end
 
+-- CRITICAL FIX: Force loaded function to use current environment (LOADSTRING_ENVIRONMENT_BUG.md)
+setfenv(loadFunc, getfenv())
+
 Looting = loadFunc()
 if not Looting then
     error("looting.lua did not return a module table")
 end
 _G.Looting = Looting
 print("[✓] Looting loaded")
+
+-- Load movement module
+print("Loading movement.lua...")
+local movementCode = ReadFile(_G.BOTETO_BASE_PATH .. "core/movement.lua")
+if not movementCode then
+    error("Failed to load movement.lua")
+end
+
+loadFunc, loadErr = (load or loadstring)(movementCode, "movement.lua")
+if not loadFunc then
+    error("Failed to compile movement.lua: " .. tostring(loadErr))
+end
+
+setfenv(loadFunc, getfenv())
+
+Movement = loadFunc()
+if not Movement then
+    error("movement.lua did not return a module table")
+end
+_G.Movement = Movement
+print("[✓] Movement loaded")
 
 -- ============================================
 -- DEBUG COMMANDS (defined early so they work even if GUI errors)
@@ -198,51 +223,176 @@ local function GetPlayer()
     return nil
 end
 
--- Get nearby alive enemies (global so Combat module can use it)
+-- Get nearby alive enemies (BANETO pattern)
+local lastGetEnemiesDebug = 0
 function GetEnemies(maxDistance)
     local enemies = {}
-    local player = GetPlayer()
-    if not player then return enemies end
 
-    local px, py, pz = ObjectPosition(player)
-    local objs = Objects()
+    -- Get units only (Objects(5) returns only units, not all objects)
+    local units = Objects(5)
+    local px, py, pz = ObjectPosition("player")
 
-    for _, obj in pairs(objs) do
-        local objType = ObjectType(obj)
+    if not px then
+        if GetTime() >= lastGetEnemiesDebug + 1 then
+            print("[DEBUG] Could not get player position!")
+            lastGetEnemiesDebug = GetTime()
+        end
+        return enemies
+    end
 
-        -- Only process units (type 3-6), but skip corpses (type 5)
-        if objType >= 3 and objType <= 6 and objType ~= 5 then
-            local ox, oy, oz = ObjectPosition(obj)
-            local dist = math.sqrt((px-ox)^2 + (py-oy)^2 + (pz-oz)^2)
+    for i = 1, #units do
+        local unit = units[i]
+        local ux, uy, uz = ObjectPosition(unit)
+
+        if ux then
+            local dist = math.sqrt((px-ux)^2 + (py-uy)^2 + (pz-uz)^2)
 
             if dist <= maxDistance then
-                -- Skip if can be looted (dead)
-                local canLoot = UnitCanBeLooted and UnitCanBeLooted(obj)
-                if not canLoot then
-                    table.insert(enemies, {obj = obj, distance = dist})
+                -- Filter out critters
+                local creatureType = UnitCreatureType(unit)
+
+                if creatureType ~= "Critter" then
+                    -- Check if attackable (BANETO pattern)
+                    if UnitCanAttack("player", unit) then
+                        -- Skip if dead/lootable
+                        local canLoot = UnitCanBeLooted and UnitCanBeLooted(unit)
+                        if not canLoot then
+                            table.insert(enemies, {obj = unit, distance = dist})
+                        end
+                    end
                 end
             end
         end
     end
 
     table.sort(enemies, function(a, b) return a.distance < b.distance end)
+
+    -- Debug output once per second
+    if GetTime() >= lastGetEnemiesDebug + 1 then
+        print(string.format("[DEBUG] GetEnemies: Units=%d, Enemies=%d", #units, #enemies))
+        lastGetEnemiesDebug = GetTime()
+    end
+
     return enemies
 end
 
 -- Make combat helper functions globally accessible
 _G.GetEnemies = GetEnemies
 
--- Main update function
+-- Main update function (BANETO pattern)
+local BANETO_TARGET = nil
+local lastFaceTime = 0  -- Timer for facing (BANETO pattern line 69572)
+local lastRetargetCheck = 0  -- Timer for re-targeting (BANETO pattern)
 local function BotUpdate()
     if not _G.BotEnabled then return end
 
     updateCount = updateCount + 1
 
-    -- Execute combat rotation
-    Combat.ExecuteRotation()
+    local currentState = StateMachine.GetState()
 
-    -- Execute looting (runs after combat)
-    Looting.ExecuteLooting()
+    -- FIGHTING STATE
+    if currentState == StateMachine.STATES.FIGHTING or currentState == StateMachine.STATES.IDLE then
+        -- Find target if none exists
+        if not UnitExists("target") then
+            local enemies = GetEnemies(70)
+            if #enemies > 0 then
+                BANETO_TARGET = enemies[1].obj
+                TargetUnit(BANETO_TARGET)
+                StateMachine.SetState(StateMachine.STATES.FIGHTING)
+            else
+                -- No enemies, check for looting
+                StateMachine.SetState(StateMachine.STATES.IDLE)
+                BANETO_TARGET = nil
+            end
+        end
+
+        -- Re-target to closer enemies during combat (BANETO pattern - every 5 seconds)
+        if UnitExists("target") and UnitAffectingCombat("player") then
+            if GetTime() >= lastRetargetCheck + 5 then
+                local currentTargetDist = nil
+                local tx, ty, tz = ObjectPosition("target")
+                local px, py, pz = ObjectPosition("player")
+
+                if tx and px then
+                    currentTargetDist = math.sqrt((px-tx)^2 + (py-ty)^2 + (pz-tz)^2)
+                end
+
+                local enemies = GetEnemies(70)
+                -- Switch if new enemy is 15+ yards closer
+                if #enemies > 0 and currentTargetDist and enemies[1].distance < (currentTargetDist - 15) then
+                    BANETO_TARGET = enemies[1].obj
+                    TargetUnit(BANETO_TARGET)
+                end
+
+                lastRetargetCheck = GetTime()
+            end
+        end
+
+        -- If target exists, execute combat
+        if UnitExists("target") then
+            local tx, ty, tz = ObjectPosition("target")
+            local targetHealth = UnitHealth("target")
+
+            -- BANETO line 69566: Check target position AND health > 0
+            if tx and targetHealth and targetHealth > 0 then
+                local px, py, pz = ObjectPosition("player")
+                if px then
+                    local dist = math.sqrt((px-tx)^2 + (py-ty)^2 + (pz-tz)^2)
+
+                    -- BANETO line 69567: If within combat range (5 yards)
+                    if dist <= 5 then
+                        -- BANETO line 69582-69586: Stop movement if moving
+                        local currentSpeed = GetUnitSpeed("player")
+                        if currentSpeed and currentSpeed > 0 then
+                            Movement.StopMovement()
+                        end
+
+                        -- BANETO line 69572-69575: Face target every 0.3 seconds
+                        if not lastFaceTime or GetTime() > lastFaceTime + 0.3 then
+                            FaceObject("target")
+                            lastFaceTime = GetTime()
+                        end
+
+                        -- BANETO line 69613: Execute rotation
+                        Combat.ExecuteRotation()
+
+                    -- BANETO line 69616-69617: NOT in range AND not casting/channeling
+                    elseif dist > 5 and dist <= 70 and not UnitCastingInfo("player") and not UnitChannelInfo("player") then
+                        Movement.MeshTo(tx, ty, tz)
+                    end
+                end
+            else
+                -- BANETO line 69620-69621: Target dead, clear it
+                BANETO_TARGET = nil
+                ClearTarget()
+            end
+        -- No target and not in combat, check if we should loot
+        elseif not UnitAffectingCombat("player") then
+            -- Only switch to LOOTING if corpses actually exist
+            local lootableCorpses = Looting.GetLootableCorpses()
+            local skinnableCorpses = Looting.CanPlayerSkin() and Looting.GetSkinnableCorpses() or {}
+
+            if #lootableCorpses > 0 or #skinnableCorpses > 0 then
+                StateMachine.SetState(StateMachine.STATES.LOOTING)
+            else
+                -- No corpses to loot, stay in IDLE
+                StateMachine.SetState(StateMachine.STATES.IDLE)
+            end
+        end
+    end
+
+    -- LOOTING STATE
+    if currentState == StateMachine.STATES.LOOTING then
+        Looting.ExecuteLooting()
+
+        -- Return to IDLE when done looting
+        local lootableCorpses = Looting.GetLootableCorpses()
+        local skinnableCorpses = Looting.CanPlayerSkin() and Looting.GetSkinnableCorpses() or {}
+
+        if #lootableCorpses == 0 and #skinnableCorpses == 0 then
+            StateMachine.SetState(StateMachine.STATES.IDLE)
+        end
+    end
 end
 
 -- Reuse existing frame or create new one (prevents multiple frames on reload)
@@ -276,6 +426,8 @@ function StopBot()
     if _G.WowBotFrame then
         _G.WowBotFrame:SetScript("OnUpdate", nil)
     end
+    -- Stop character movement (BANETO pattern - line 4412)
+    Movement.StopMovement()
     StateMachine.SetState(StateMachine.STATES.IDLE)
     print("=== Bot Stopped ===")
 end
@@ -376,7 +528,7 @@ function UpdateGUI()
     local player = GetPlayer()
     if player then
         local x, y, z = ObjectPosition(player)
-        local enemies = GetEnemies(40)
+        local enemies = GetEnemies(70)
         local currentState = StateMachine.GetState()
         local timeInState = StateMachine.GetTimeInCurrentState()
 
@@ -723,9 +875,18 @@ function LoadRotationByName()
     -- Clear current rotation
     _G.CurrentRotation = {}
 
+    -- DEBUG: Check rotation structure
+    print("[DEBUG] rotation type: " .. type(rotation))
+    print("[DEBUG] rotation.name: " .. tostring(rotation.name))
+    print("[DEBUG] rotation.spells type: " .. type(rotation.spells))
+    if rotation.spells then
+        print("[DEBUG] rotation.spells count: " .. #rotation.spells)
+    end
+
     -- Load spells from file
     if rotation.spells then
         for _, spell in ipairs(rotation.spells) do
+            print("[DEBUG] Loading spell: ID=" .. tostring(spell.id) .. ", Name=" .. tostring(spell.name))
             table.insert(_G.CurrentRotation, {
                 id = spell.id,
                 name = spell.name,
@@ -733,6 +894,8 @@ function LoadRotationByName()
             })
         end
     end
+
+    print("[DEBUG] _G.CurrentRotation count after load: " .. #_G.CurrentRotation)
 
     -- Update display
     UpdateRotationList()
@@ -742,6 +905,13 @@ function LoadRotationByName()
     print("Spells: " .. #_G.CurrentRotation)
     print("====================================")
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00Rotation '" .. rotName .. "' loaded successfully!|r")
+
+    -- Save this as the last loaded rotation
+    local configDir = _G.BOTETO_BASE_PATH .. "config/"
+    if not FileManagement.DirectoryExists(configDir) then
+        FileManagement.CreateDirectory(configDir)
+    end
+    FileManagement.WriteFile(configDir .. "last_rotation.txt", rotName, false)
 end
 
 -- Make load rotation function globally accessible
@@ -761,6 +931,39 @@ end
 _G.ToggleRotationBuilder = ToggleRotationBuilder
 
 -- Modules and debug commands already exported at top of file
+
+-- ============================================
+-- AUTO-LOAD LAST ROTATION
+-- ============================================
+
+-- Auto-load last rotation if available
+local configDir = _G.BOTETO_BASE_PATH .. "config/"
+local lastRotFile = configDir .. "last_rotation.txt"
+if FileManagement.FileExists(lastRotFile) then
+    local lastRotName = FileManagement.ReadFile(lastRotFile)
+    if lastRotName and lastRotName ~= "" then
+        -- Clean up any whitespace
+        lastRotName = lastRotName:match("^%s*(.-)%s*$")
+        print("[Init] Auto-loading last rotation: " .. lastRotName)
+
+        -- Load the rotation
+        local rotation = FileManagement.LoadRotation(lastRotName)
+        if rotation and rotation.spells then
+            _G.CurrentRotation = {}
+            for _, spell in ipairs(rotation.spells) do
+                table.insert(_G.CurrentRotation, {
+                    id = spell.id,
+                    name = spell.name,
+                    icon = spell.icon
+                })
+            end
+            UpdateRotationList()
+            print("[Init] Rotation '" .. lastRotName .. "' loaded with " .. #_G.CurrentRotation .. " spells")
+        else
+            print("[Init] Failed to load rotation: " .. lastRotName)
+        end
+    end
+end
 
 -- ============================================
 -- SUCCESS MESSAGE

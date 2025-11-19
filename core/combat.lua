@@ -55,16 +55,16 @@ end
 -- @param spellId: number - spell ID to check
 -- @return boolean - true if usable, false otherwise
 function Combat.IsSpellUsable(spellId)
-    -- Check if spell info exists
-    local spellInfo = C_Spell and C_Spell.GetSpellInfo(spellId)
-    if not spellInfo then
+    -- Check if spell info exists (Classic API)
+    local spellName = GetSpellInfo(spellId)
+    if not spellName then
         return false
     end
 
-    -- Check if spell is usable (has resources, not locked, etc.)
-    local usable, nomana = false, false
-    if C_Spell and C_Spell.IsSpellUsable then
-        usable, nomana = C_Spell.IsSpellUsable(spellId)
+    -- Check if spell is usable (Classic API)
+    local usable, nomana = IsUsableSpell(spellId)
+    if not usable then
+        return false
     end
 
     -- Check if on cooldown
@@ -144,14 +144,12 @@ end
 -- @param target: object - optional target object
 -- @return boolean - true if cast was attempted, false otherwise
 function Combat.CastSpell(spellId, target)
-    -- Get spell info
-    local spellInfo = C_Spell and C_Spell.GetSpellInfo(spellId)
-    if not spellInfo then
+    -- Get spell info (Classic API)
+    local spellName = GetSpellInfo(spellId)
+    if not spellName then
         print("[Combat] Failed to get spell info for ID: " .. tostring(spellId))
         return false
     end
-
-    local spellName = spellInfo.name
 
     -- Cast the spell (target should already be set via Combat.SetTarget)
     local success = pcall(CastSpellByName, spellName)
@@ -206,38 +204,40 @@ end
 -- Execute the current rotation (priority-based system)
 -- This is the main function called every frame by the bot
 function Combat.ExecuteRotation()
-    -- Check if we have a rotation loaded
+    -- Check if rotation loaded
     if not _G.CurrentRotation or #_G.CurrentRotation == 0 then
+        print("[Combat] No rotation loaded!")
         return
     end
 
-    -- Get or set target
-    local target = Combat.GetBestTarget()
-    if not target then
-        -- No enemies nearby, go idle
-        if StateMachine and StateMachine.IsState and StateMachine.STATES then
-            if not StateMachine.IsState(StateMachine.STATES.IDLE) then
-                StateMachine.SetState(StateMachine.STATES.IDLE)
-            end
+    -- BANETO line 25705-25706: 1 second delay between attempts
+    if not _G.ROTATION_DELAY or _G.ROTATION_DELAY < GetTime() then
+        _G.ROTATION_DELAY = GetTime() + 1
+
+        -- BANETO line 25707-25709: Initialize iterator
+        if not _G.ROTATION_ITER then
+            _G.ROTATION_ITER = 1
         end
-        return
-    end
 
-    -- Set target
-    Combat.SetTarget(target)
+        -- BANETO line 25710: Get current spell from rotation
+        local spell = _G.CurrentRotation[_G.ROTATION_ITER]
 
-    -- Enter fighting state
-    if StateMachine and StateMachine.SetState and StateMachine.STATES then
-        if not StateMachine.IsState(StateMachine.STATES.FIGHTING) then
-            StateMachine.SetState(StateMachine.STATES.FIGHTING)
+        print(string.format("[Combat] Trying spell ID %d, Name: %s", spell.id, spell.name or "unknown"))
+
+        local onCD = Combat.IsSpellOnCooldown(spell.id)
+        local usable = Combat.IsSpellUsable(spell.id)
+
+        print(string.format("[Combat] OnCooldown: %s, Usable: %s", tostring(onCD), tostring(usable)))
+
+        -- BANETO line 25712-25714: Check if can cast and cast
+        if not onCD and usable then
+            Combat.CastSpell(spell.id)
+            _G.ROTATION_ITER = _G.ROTATION_ITER + 1
         end
-    end
 
-    -- Loop through rotation in priority order
-    for i, spell in ipairs(_G.CurrentRotation) do
-        if Combat.CanCastSpell(spell.id, target) then
-            Combat.CastSpell(spell.id, target)
-            return -- Only cast one spell per update
+        -- BANETO line 25716-25718: Loop iterator back to start
+        if _G.ROTATION_ITER > #_G.CurrentRotation then
+            _G.ROTATION_ITER = 1
         end
     end
 end

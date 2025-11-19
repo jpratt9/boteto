@@ -77,10 +77,11 @@ function Looting.GetLootableCorpses(maxDistance)
 
         -- Type 5 is corpse in WoW object types
         if objType == 5 then
-            -- Check if can be looted
+            -- Check if can be looted and not tap-denied (BANETO pattern line 17881)
             local canLoot = UnitCanBeLooted and UnitCanBeLooted(obj)
+            local isTapDenied = UnitIsTapDenied and UnitIsTapDenied(obj)
 
-            if canLoot then
+            if canLoot and not isTapDenied then
                 local ox, oy, oz = ObjectPosition(obj)
                 local dist = math.sqrt((px-ox)^2 + (py-oy)^2 + (pz-oz)^2)
 
@@ -298,16 +299,16 @@ end
 
 -- Execute looting logic (called every frame)
 function Looting.ExecuteLooting()
-    -- Check if we have bag space (need at least 1 slot)
-    if not Looting.HasBagSpace(1) then
-        print("[Looting] No bag space available")
-        return
-    end
-
     -- First, try to loot nearby corpses
     local lootableCorpses = Looting.GetLootableCorpses()
 
     if #lootableCorpses > 0 then
+        -- Check if we have bag space before trying to loot
+        if not Looting.HasBagSpace(1) then
+            print("[Looting] No bag space available, skipping loot")
+            return
+        end
+
         -- Enter looting state
         if StateMachine and StateMachine.SetState and StateMachine.STATES then
             if not StateMachine.IsState(StateMachine.STATES.LOOTING) then
@@ -315,9 +316,22 @@ function Looting.ExecuteLooting()
             end
         end
 
-        -- Loot closest corpse
+        -- Get closest corpse
         local corpse = lootableCorpses[1]
-        Looting.LootCorpse(corpse.obj)
+        local cx, cy, cz = ObjectPosition(corpse.obj)
+
+        if cx then
+            -- Check if player is within 3.5 yards of corpse (BANETO pattern - line 11896)
+            if not Movement.PlayerPosition(cx, cy, cz, 3.5) then
+                -- Not in range, move to corpse
+                Movement.MeshTo(cx, cy, cz)
+            else
+                -- In range, loot if window not visible
+                if not Looting.IsLootWindowOpen() then
+                    Looting.LootCorpse(corpse.obj)
+                end
+            end
+        end
         return
     end
 
@@ -326,6 +340,12 @@ function Looting.ExecuteLooting()
         local skinnableCorpses = Looting.GetSkinnableCorpses()
 
         if #skinnableCorpses > 0 then
+            -- Check if we have bag space before trying to skin
+            if not Looting.HasBagSpace(1) then
+                print("[Looting] No bag space available, skipping skinning")
+                return
+            end
+
             -- Enter looting state
             if StateMachine and StateMachine.SetState and StateMachine.STATES then
                 if not StateMachine.IsState(StateMachine.STATES.LOOTING) then
@@ -333,9 +353,20 @@ function Looting.ExecuteLooting()
                 end
             end
 
-            -- Skin closest corpse
+            -- Get closest skinnable corpse
             local corpse = skinnableCorpses[1]
-            Looting.SkinCorpse(corpse.obj)
+            local cx, cy, cz = ObjectPosition(corpse.obj)
+
+            if cx then
+                -- Check if player is within 3.5 yards of corpse (BANETO pattern)
+                if not Movement.PlayerPosition(cx, cy, cz, 3.5) then
+                    -- Not in range, move to corpse
+                    Movement.MeshTo(cx, cy, cz)
+                else
+                    -- In range, skin the corpse
+                    Looting.SkinCorpse(corpse.obj)
+                end
+            end
             return
         end
     end

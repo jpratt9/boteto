@@ -149,6 +149,9 @@ function FileManagement.LoadRotation(rotationName)
         return nil
     end
 
+    -- CRITICAL FIX: Force loaded function to use current environment (LOADSTRING_ENVIRONMENT_BUG.md)
+    setfenv(loadFunc, getfenv())
+
     local success, rotation = pcall(loadFunc)
     if not success then
         print("[FileManagement] Failed to execute rotation: " .. tostring(rotation))
