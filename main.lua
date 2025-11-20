@@ -137,6 +137,28 @@ end
 _G.Looting = Looting
 print("[✓] Looting loaded")
 
+-- Load vendor module
+print("Loading vendor.lua...")
+local vendorCode = ReadFile(_G.BOTETO_BASE_PATH .. "core/vendor.lua")
+if not vendorCode then
+    error("Failed to load vendor.lua")
+end
+
+loadFunc, loadErr = (load or loadstring)(vendorCode, "vendor.lua")
+if not loadFunc then
+    error("Failed to compile vendor.lua: " .. tostring(loadErr))
+end
+
+-- CRITICAL FIX: Force loaded function to use current environment (LOADSTRING_ENVIRONMENT_BUG.md)
+setfenv(loadFunc, getfenv())
+
+Vendor = loadFunc()
+if not Vendor then
+    error("vendor.lua did not return a module table")
+end
+_G.Vendor = Vendor
+print("[✓] Vendor loaded")
+
 -- Load movement module
 print("Loading movement.lua...")
 local movementCode = ReadFile(_G.BOTETO_BASE_PATH .. "core/movement.lua")
@@ -454,28 +476,78 @@ _G.StartBot = StartBot
 -- Create main GUI window
 local gui = _G.WowBotGUI
 if not gui then
-    -- Create main frame
-    gui = CreateFrame("Frame", "WowBotGUI", UIParent, "BasicFrameTemplateWithInset")
-    gui:SetSize(300, 400)
-    gui:SetPoint("CENTER")
+    -- Create main frame (BANETO style)
+    gui = CreateFrame("Frame", "WowBotGUI", UIParent)
+    gui:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 23, -120)
+    gui:SetSize(225, 55)
+    gui:SetFrameLevel(10)
     gui:SetMovable(true)
     gui:EnableMouse(true)
     gui:RegisterForDrag("LeftButton")
     gui:SetScript("OnDragStart", gui.StartMoving)
     gui:SetScript("OnDragStop", gui.StopMovingOrSizing)
-    gui:SetFrameStrata("HIGH")
 
-    -- Title
-    gui.title = gui:CreateFontString(nil, "OVERLAY")
-    gui.title:SetFontObject("GameFontHighlight")
-    gui.title:SetPoint("TOP", 0, -5)
-    gui.title:SetText("WoW Bot Control")
+    -- Create backdrop (BANETO pattern)
+    gui.Backdrop = CreateFrame("Frame", nil, gui, "BackdropTemplate")
+    gui.Backdrop:SetAllPoints()
+    gui.Backdrop:SetFrameLevel(8)
+    gui.Backdrop:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile = false,
+        tileSize = 16,
+        edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    gui.Backdrop:EnableMouse(false)  -- Don't intercept mouse events
 
-    -- Status text
+    -- Title with MORPHEUS font (BANETO pattern)
+    gui.title = gui:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    gui.title:SetPoint("CENTER", 1, -3)
+    gui.title:SetText("BOTETO")
+    -- Check locale for font choice
+    local locale = GetLocale()
+    if locale == "zhCN" or locale == "zhTW" or locale == "koKR" or locale == "ruRU" then
+        gui.title:SetFont("Fonts\\FRIZQT__.TTF", 29)
+    else
+        gui.title:SetFont("Fonts\\MORPHEUS.ttf", 29)
+    end
+
+    -- Stats bar overlay (BANETO pattern)
+    gui.statsFrame = CreateFrame("Frame", nil, gui)
+    gui.statsFrame:SetPoint("TOP", 0, 35)
+    gui.statsFrame:SetSize(218, 40)
+    gui.statsFrame:SetFrameLevel(7)
+    gui.statsFrame:EnableMouse(false)  -- Don't intercept mouse events
+
+    -- Stats bar backdrop
+    gui.statsFrame.Backdrop = CreateFrame("Frame", nil, gui.statsFrame, "BackdropTemplate")
+    gui.statsFrame.Backdrop:SetAllPoints()
+    gui.statsFrame.Backdrop:SetFrameLevel(2)
+    gui.statsFrame.Backdrop:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile = false,
+        tileSize = 16,
+        edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    gui.statsFrame.Backdrop:SetBackdropColor(0, 0, 0, 0.1)
+    gui.statsFrame.Backdrop:EnableMouse(false)  -- Don't intercept mouse events
+
+    -- Stats text (BANETO pattern - line 71730-71731)
+    gui.statsText = gui.statsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    gui.statsText:SetPoint("CENTER", 0, 6)
+    local fontName, _, fontFlags = gui.statsText:GetFont()
+    gui.statsText:SetFont(fontName, 18, fontFlags)
+    gui.statsText:SetText("|cff0872B2IDLE|cffB9B9B9 | Targets: 0 | Deaths: 0")
+
+    -- Status text (keep for compatibility)
     gui.status = gui:CreateFontString(nil, "OVERLAY")
     gui.status:SetFontObject("GameFontNormal")
     gui.status:SetPoint("TOP", 0, -40)
     gui.status:SetText("Status: Stopped")
+    gui.status:Hide()  -- Hidden in compact mode
 
     -- Start/Stop button
     gui.toggleBtn = CreateFrame("Button", nil, gui, "GameMenuButtonTemplate")
@@ -489,6 +561,7 @@ if not gui then
             StartBot()
         end
     end)
+    gui.toggleBtn:Hide()  -- Hidden in compact mode
 
     -- Rotation Builder button
     gui.rotationBtn = CreateFrame("Button", nil, gui, "GameMenuButtonTemplate")
@@ -498,13 +571,21 @@ if not gui then
     gui.rotationBtn:SetScript("OnClick", function()
         ToggleRotationBuilder()
     end)
+    gui.rotationBtn:Hide()  -- Hidden in compact mode
 
-    -- Stats frame
-    gui.statsText = gui:CreateFontString(nil, "OVERLAY")
-    gui.statsText:SetFontObject("GameFontNormalSmall")
-    gui.statsText:SetPoint("TOPLEFT", 20, -150)
-    gui.statsText:SetJustifyH("LEFT")
-    gui.statsText:SetText("Targets Found: 0\nBot State: Idle")
+    -- Sell Junk button
+    gui.sellJunkBtn = CreateFrame("Button", nil, gui, "GameMenuButtonTemplate")
+    gui.sellJunkBtn:SetSize(120, 30)
+    gui.sellJunkBtn:SetPoint("TOP", 0, -150)
+    gui.sellJunkBtn:SetText("Sell Junk")
+    gui.sellJunkBtn:SetScript("OnClick", function()
+        if Vendor.IsMerchantOpen() then
+            Vendor.SellGrayItems()
+        else
+            print("[Vendor] Please open a merchant window first!")
+        end
+    end)
+    gui.sellJunkBtn:Hide()  -- Hidden in compact mode
 
     _G.WowBotGUI = gui
     print("Created GUI window")
@@ -909,9 +990,30 @@ function LoadRotationByName()
     -- Save this as the last loaded rotation
     local configDir = _G.BOTETO_BASE_PATH .. "config/"
     if not FileManagement.DirectoryExists(configDir) then
-        FileManagement.CreateDirectory(configDir)
+        print("[LoadRotation] Creating config directory: " .. configDir)
+        local dirSuccess = FileManagement.CreateDirectory(configDir)
+        if not dirSuccess then
+            print("[WARNING] Failed to create config directory")
+        else
+            -- Directory created, try to write file
+            local lastRotFile = configDir .. "last_rotation.txt"
+            local writeSuccess = FileManagement.WriteFile(lastRotFile, rotName, false)
+            if writeSuccess then
+                print("[LoadRotation] Saved as last rotation: " .. rotName)
+            else
+                print("[WARNING] Failed to save last rotation file")
+            end
+        end
+    else
+        -- Directory exists, write file
+        local lastRotFile = configDir .. "last_rotation.txt"
+        local writeSuccess = FileManagement.WriteFile(lastRotFile, rotName, false)
+        if writeSuccess then
+            print("[LoadRotation] Saved as last rotation: " .. rotName)
+        else
+            print("[WARNING] Failed to save last rotation file")
+        end
     end
-    FileManagement.WriteFile(configDir .. "last_rotation.txt", rotName, false)
 end
 
 -- Make load rotation function globally accessible
@@ -933,11 +1035,21 @@ _G.ToggleRotationBuilder = ToggleRotationBuilder
 -- Modules and debug commands already exported at top of file
 
 -- ============================================
+-- INITIALIZE CONFIG DIRECTORY
+-- ============================================
+
+-- Create config directory if it doesn't exist
+local configDir = _G.BOTETO_BASE_PATH .. "config/"
+if not FileManagement.DirectoryExists(configDir) then
+    print("[Init] Creating config directory: " .. configDir)
+    FileManagement.CreateDirectory(configDir)
+end
+
+-- ============================================
 -- AUTO-LOAD LAST ROTATION
 -- ============================================
 
 -- Auto-load last rotation if available
-local configDir = _G.BOTETO_BASE_PATH .. "config/"
 local lastRotFile = configDir .. "last_rotation.txt"
 if FileManagement.FileExists(lastRotFile) then
     local lastRotName = FileManagement.ReadFile(lastRotFile)
