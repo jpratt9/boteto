@@ -5,6 +5,10 @@
 
 local Movement = {}
 
+-- Track active bot navigation path (BANETO pattern: waPath)
+-- If BOTETO_PATH ~= nil, bot owns movement. If nil, player owns it.
+_G.BOTETO_PATH = nil
+
 -- ============================================
 -- MOVEMENT START/STOP FUNCTIONS (BANETO EXACT)
 -- ============================================
@@ -36,6 +40,9 @@ function Movement.StopMovement()
             Movement.MoveBackwardStart()
         end
         Movement.MoveBackwardStop()
+
+        -- Clear bot path (BANETO pattern)
+        _G.BOTETO_PATH = nil
     end
 end
 
@@ -157,6 +164,8 @@ function Movement.MeshTo(x, y, z)
         local angleDiff = math.abs(currentAngle - angle)
         if angleDiff < 0.4 or angleDiff > 5.9 then  -- ~23 degrees tolerance
             Movement.MoveForwardStart()
+            -- Set bot path (BANETO pattern: waPath)
+            _G.BOTETO_PATH = {x = x, y = y, z = z}
         end
     end
 
